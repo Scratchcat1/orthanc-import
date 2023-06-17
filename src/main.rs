@@ -77,13 +77,35 @@ fn send_files(
                 // println!("{:?}", response.text());
                 // println!("HI");
                 let parsed_response = if response.status().is_success() {
-                    Ok(response
-                        .json::<OrthancUploadResponse>()
-                        .expect("Could not parse server response"))
+                    let json = response.json::<OrthancUploadResponse>();
+                    match json {
+                        Ok(x) => Ok(x),
+                        Err(_) => Err(OrthancErrorResponse {
+                            details: "Failed to parse".to_string(),
+                            http_error: "".to_string(),
+                            http_status: 0,
+                            message: "".to_string(),
+                            method: "".to_string(),
+                            orthanc_error: "".to_string(),
+                            orthanc_status: 0,
+                            uri: "".to_string(),
+                        }),
+                    }
                 } else {
-                    Err(response
-                        .json()
-                        .expect("Expected response to have parseable body"))
+                    let json = response.json();
+                    match json {
+                        Ok(x) => Err(x),
+                        Err(_) => Err(OrthancErrorResponse {
+                            details: "Failed to parse".to_string(),
+                            http_error: "".to_string(),
+                            http_status: 0,
+                            message: "".to_string(),
+                            method: "".to_string(),
+                            orthanc_error: "".to_string(),
+                            orthanc_status: 0,
+                            uri: "".to_string(),
+                        }),
+                    }
                 };
 
                 responses_tx
