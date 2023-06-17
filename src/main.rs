@@ -70,9 +70,13 @@ fn send_files(
                 if username.is_some() && password.is_some() {
                     request = request.basic_auth(username.as_ref().unwrap(), password.as_ref());
                 }
-                let response = request
-                    .send()
-                    .expect("An error occured while making request");
+                let response = match (request.send()) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        eprintln!("Failed request {}", e);
+                        return ();
+                    }
+                };
 
                 // println!("{:?}", response.text());
                 // println!("HI");
