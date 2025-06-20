@@ -7,7 +7,7 @@ use std::sync::RwLock;
 
 pub trait FileUploadHistory {
     fn already_uploaded(&self, path: &PathBuf) -> bool;
-    fn on_success(&self, path: &PathBuf);
+    fn on_uploaded(&self, path: &PathBuf);
 }
 
 pub struct DisabledFileUploadHistory;
@@ -16,7 +16,7 @@ impl FileUploadHistory for DisabledFileUploadHistory {
         false
     }
 
-    fn on_success(&self, _path: &PathBuf) {}
+    fn on_uploaded(&self, _path: &PathBuf) {}
 }
 
 pub struct TextFileUploadHistory {
@@ -50,7 +50,7 @@ impl FileUploadHistory for TextFileUploadHistory {
         self.paths.read().unwrap().contains(path)
     }
 
-    fn on_success(&self, path: &PathBuf) {
+    fn on_uploaded(&self, path: &PathBuf) {
         let mut paths = self.paths.write().unwrap();
         paths.insert(path.clone());
         self.save_to_file(path).unwrap()

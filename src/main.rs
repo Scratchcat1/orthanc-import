@@ -109,12 +109,12 @@ fn main() {
         &args.password,
         args.threads,
     );
-    
+
     let mut successes = 0;
     let mut failures = 0;
     responses_rx.iter().for_each(|upload_result| {
+        file_upload_history.on_uploaded(&upload_result.path);
         if upload_result.response.is_ok() {
-            file_upload_history.on_success(&upload_result.path);
             successes += 1;
         } else {
             failures += 1;
@@ -131,7 +131,7 @@ fn main() {
             }
         }
     });
-    
+
     println!("Successes: {}", successes);
     println!("Failures: {}", failures);
 }
