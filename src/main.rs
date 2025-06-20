@@ -1,13 +1,14 @@
 mod orthanc_types;
-mod cache;
+mod file_upload_history;
 
 use clap::Parser;
 use crossbeam::channel::{bounded, Receiver, Sender};
 use orthanc_types::{OrthancErrorResponse, OrthancUploadResponse};
 use std::{fs::File, path::PathBuf, thread, time::Duration};
+use std::sync::Arc;
 use threadpool::ThreadPool;
 use walkdir::WalkDir;
-use crate::cache::Cache;
+use crate::file_upload_history::{FileUploadHistory, NoFileUploadHistory, TextFileUploadHistory};
 
 /// Command-line tool to import files into Orthanc.
 #[derive(Parser, Debug)]
@@ -51,6 +52,7 @@ struct UploadResult {
 fn send_files(
     files_rx: Receiver<PathBuf>,
     responses_tx: Sender<UploadResult>,
+    file_upload_history: Arc<dyn FileUploadHistory + Send + Sync>,
     url: &str,
     username: &Option<String>,
     password: &Option<String>,
@@ -61,6 +63,7 @@ fn send_files(
     for _ in 0..threads {
         let files_rx = files_rx.clone();
         let responses_tx = responses_tx.clone();
+        let file_upload_history =  file_upload_history.clone();
         let url = url.to_owned();
         let username = username.clone().to_owned();
         let password = password.clone().to_owned();
@@ -71,59 +74,63 @@ fn send_files(
                 .expect("Failed to create HTTP Client");
 
             files_rx.iter().for_each(|path| {
-                let file = File::open(path.clone()).unwrap();
-                let mut request = client.post(format!("{}/instances", url)).body(file);
-                if username.is_some() && password.is_some() {
-                    request = request.basic_auth(username.as_ref().unwrap(), password.as_ref());
-                }
-                let response = match (request.send()) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        eprintln!("Failed request {}", e);
-                        return ();
-                    }
-                };
-
-                // println!("{:?}", response.text());
-                // println!("HI");
-                let parsed_response = if response.status().is_success() {
-                    let json = response.json::<OrthancUploadResponse>();
-                    match json {
-                        Ok(x) => Ok(x),
-                        Err(_) => Err(OrthancErrorResponse {
-                            details: "Failed to parse".to_string(),
-                            http_error: "".to_string(),
-                            http_status: 0,
-                            message: "".to_string(),
-                            method: "".to_string(),
-                            orthanc_error: "".to_string(),
-                            orthanc_status: 0,
-                            uri: "".to_string(),
-                        }),
-                    }
+                if file_upload_history.already_uploaded(&path) {
+                    println!("{} skipped",  path.display());
                 } else {
-                    let json = response.json();
-                    match json {
-                        Ok(x) => Err(x),
-                        Err(_) => Err(OrthancErrorResponse {
-                            details: "Failed to parse".to_string(),
-                            http_error: "".to_string(),
-                            http_status: 0,
-                            message: "".to_string(),
-                            method: "".to_string(),
-                            orthanc_error: "".to_string(),
-                            orthanc_status: 0,
-                            uri: "".to_string(),
-                        }),
+                    let file = File::open(&path).unwrap();
+                    let mut request = client.post(format!("{}/instances", url)).body(file);
+                    if username.is_some() && password.is_some() {
+                        request = request.basic_auth(username.as_ref().unwrap(), password.as_ref());
                     }
-                };
+                    let response = match request.send() {
+                        Ok(r) => r,
+                        Err(e) => {
+                            eprintln!("Failed request {}", e);
+                            return ();
+                        }
+                    };
 
-                responses_tx
-                    .send(UploadResult {
-                        path,
-                        response: parsed_response,
-                    })
-                    .expect("channel will be there waiting for the pool");
+                    // println!("{:?}", response.text());
+                    // println!("HI");
+                    let parsed_response = if response.status().is_success() {
+                        let json = response.json::<OrthancUploadResponse>();
+                        match json {
+                            Ok(x) => Ok(x),
+                            Err(_) => Err(OrthancErrorResponse {
+                                details: "Failed to parse".to_string(),
+                                http_error: "".to_string(),
+                                http_status: 0,
+                                message: "".to_string(),
+                                method: "".to_string(),
+                                orthanc_error: "".to_string(),
+                                orthanc_status: 0,
+                                uri: "".to_string(),
+                            }),
+                        }
+                    } else {
+                        let json = response.json();
+                        match json {
+                            Ok(x) => Err(x),
+                            Err(_) => Err(OrthancErrorResponse {
+                                details: "Failed to parse".to_string(),
+                                http_error: "".to_string(),
+                                http_status: 0,
+                                message: "".to_string(),
+                                method: "".to_string(),
+                                orthanc_error: "".to_string(),
+                                orthanc_status: 0,
+                                uri: "".to_string(),
+                            }),
+                        }
+                    };
+
+                    responses_tx
+                        .send(UploadResult {
+                            path,
+                            response: parsed_response,
+                        })
+                        .expect("channel will be there waiting for the pool");
+                }
             })
         })
     }
@@ -132,8 +139,10 @@ fn send_files(
 fn main() {
     let args = Args::parse();
 
-    let cache = args.cache_path.as_ref().map(|p| Cache::from_file(p));
-    let mut updated_cache = cache.clone();
+    let file_upload_history: Arc<dyn FileUploadHistory + Send + Sync> = match &args.cache_path {
+        Some(path) => Arc::new(TextFileUploadHistory::from_file(path)),
+        None => Arc::new(NoFileUploadHistory {})
+    };
 
     let (files_tx, files_rx) = bounded(100);
 
@@ -141,12 +150,10 @@ fn main() {
         WalkDir::new(&args.path)
             .into_iter()
             .filter_map(|e| e.ok())
-            .filter(|d| d.path().is_file() && !cache.as_ref().map_or(false, |c| c.paths.contains(d.path())))
+            .filter(|d| d.path().is_file())
             .for_each(|x| {
-                let files_tx = files_tx.clone();
-                let filepath = x.path().to_owned();
                 files_tx
-                    .send(filepath)
+                    .send(x.path().to_owned())
                     .expect("channel will be there waiting for the pool");
             })
     });
@@ -155,6 +162,7 @@ fn main() {
     send_files(
         files_rx,
         responses_tx,
+        file_upload_history.clone(),
         &args.url,
         &args.username,
         &args.password,
@@ -164,7 +172,7 @@ fn main() {
     responses_rx.iter().for_each(|upload_result| {
         let status = match &upload_result.response {
             Ok(response) => {
-                updated_cache.as_mut().map(|c| c.paths.insert(upload_result.path.clone()));
+                file_upload_history.on_success(&upload_result.path);
                 response.success_message()
             },
             Err(_) => "Error".to_string(),
@@ -177,6 +185,4 @@ fn main() {
             }
         }
     });
-    updated_cache.map(|c| c.save_to_file(args.cache_path.unwrap()));
-    // std::thread::sleep(Duration::from_secs(60));
 }
