@@ -1,14 +1,16 @@
 mod orthanc_types;
 mod file_upload_history;
+mod upload;
 
+use crate::file_upload_history::{DisabledFileUploadHistory, FileUploadHistory, TextFileUploadHistory};
+use crate::upload::upload_from_channel;
 use clap::Parser;
 use crossbeam::channel::{bounded, Receiver, Sender};
-use orthanc_types::{OrthancErrorResponse, OrthancUploadResponse};
-use std::{fs::File, path::PathBuf, thread, time::Duration};
 use std::sync::Arc;
+use std::{path::PathBuf, thread};
 use threadpool::ThreadPool;
+use upload::UploadResult;
 use walkdir::WalkDir;
-use crate::file_upload_history::{FileUploadHistory, NoFileUploadHistory, TextFileUploadHistory};
 
 /// Command-line tool to import files into Orthanc.
 #[derive(Parser, Debug)]
@@ -43,13 +45,7 @@ struct Args {
     path: PathBuf,
 }
 
-#[derive(Debug)]
-struct UploadResult {
-    path: PathBuf,
-    response: Result<OrthancUploadResponse, OrthancErrorResponse>,
-}
-
-fn send_files(
+fn start_send_files(
     files_rx: Receiver<PathBuf>,
     responses_tx: Sender<UploadResult>,
     file_upload_history: Arc<dyn FileUploadHistory + Send + Sync>,
@@ -68,72 +64,28 @@ fn send_files(
         let username = username.clone().to_owned();
         let password = password.clone().to_owned();
         pool.execute(move || {
-            let client = reqwest::blocking::Client::builder()
-                .timeout(Duration::from_secs(120))
-                .build()
-                .expect("Failed to create HTTP Client");
-
-            files_rx.iter().for_each(|path| {
-                if file_upload_history.already_uploaded(&path) {
-                    println!("{} skipped",  path.display());
-                } else {
-                    let file = File::open(&path).unwrap();
-                    let mut request = client.post(format!("{}/instances", url)).body(file);
-                    if username.is_some() && password.is_some() {
-                        request = request.basic_auth(username.as_ref().unwrap(), password.as_ref());
-                    }
-                    let response = match request.send() {
-                        Ok(r) => r,
-                        Err(e) => {
-                            eprintln!("Failed request {}", e);
-                            return ();
-                        }
-                    };
-
-                    // println!("{:?}", response.text());
-                    // println!("HI");
-                    let parsed_response = if response.status().is_success() {
-                        let json = response.json::<OrthancUploadResponse>();
-                        match json {
-                            Ok(x) => Ok(x),
-                            Err(_) => Err(OrthancErrorResponse {
-                                details: "Failed to parse".to_string(),
-                                http_error: "".to_string(),
-                                http_status: 0,
-                                message: "".to_string(),
-                                method: "".to_string(),
-                                orthanc_error: "".to_string(),
-                                orthanc_status: 0,
-                                uri: "".to_string(),
-                            }),
-                        }
-                    } else {
-                        let json = response.json();
-                        match json {
-                            Ok(x) => Err(x),
-                            Err(_) => Err(OrthancErrorResponse {
-                                details: "Failed to parse".to_string(),
-                                http_error: "".to_string(),
-                                http_status: 0,
-                                message: "".to_string(),
-                                method: "".to_string(),
-                                orthanc_error: "".to_string(),
-                                orthanc_status: 0,
-                                uri: "".to_string(),
-                            }),
-                        }
-                    };
-
-                    responses_tx
-                        .send(UploadResult {
-                            path,
-                            response: parsed_response,
-                        })
-                        .expect("channel will be there waiting for the pool");
-                }
-            })
+            upload_from_channel(
+                files_rx,
+                responses_tx,
+                file_upload_history,
+                url,
+                username,
+                password
+            )
         })
     }
+}
+
+fn walk_dir(path: PathBuf, files_tx: Sender<PathBuf>) {
+    WalkDir::new(path)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|d| d.path().is_file())
+        .for_each(|x| {
+            files_tx
+                .send(x.path().to_owned())
+                .expect("channel will be there waiting for the pool");
+        })
 }
 
 fn main() {
@@ -141,25 +93,14 @@ fn main() {
 
     let file_upload_history: Arc<dyn FileUploadHistory + Send + Sync> = match &args.cache_path {
         Some(path) => Arc::new(TextFileUploadHistory::from_file(path)),
-        None => Arc::new(NoFileUploadHistory {})
+        None => Arc::new(DisabledFileUploadHistory {})
     };
 
     let (files_tx, files_rx) = bounded(100);
-
-    thread::spawn(move || {
-        WalkDir::new(&args.path)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|d| d.path().is_file())
-            .for_each(|x| {
-                files_tx
-                    .send(x.path().to_owned())
-                    .expect("channel will be there waiting for the pool");
-            })
-    });
-
     let (responses_tx, responses_rx) = bounded(100);
-    send_files(
+
+    thread::spawn(move || walk_dir(args.path, files_tx));
+    start_send_files(
         files_rx,
         responses_tx,
         file_upload_history.clone(),
@@ -168,13 +109,18 @@ fn main() {
         &args.password,
         args.threads,
     );
-
+    
+    let mut successes = 0;
+    let mut failures = 0;
     responses_rx.iter().for_each(|upload_result| {
+        if upload_result.response.is_ok() {
+            file_upload_history.on_success(&upload_result.path);
+            successes += 1;
+        } else {
+            failures += 1;
+        }
         let status = match &upload_result.response {
-            Ok(response) => {
-                file_upload_history.on_success(&upload_result.path);
-                response.success_message()
-            },
+            Ok(response) => response.success_message(),
             Err(_) => "Error".to_string(),
         };
         println!("{}: {}", upload_result.path.to_string_lossy(), status);
@@ -185,4 +131,7 @@ fn main() {
             }
         }
     });
+    
+    println!("Successes: {}", successes);
+    println!("Failures: {}", failures);
 }

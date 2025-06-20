@@ -20,18 +20,18 @@ impl fmt::Display for OrthancUploadStatus {
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 pub enum OrthancUploadResponse {
-    OrthancDicomUploadResponse(OrthancDicomUploadResponse),
-    OrthancFolderUploadResponse(Vec<OrthancDicomUploadResponse>),
+    FileUploadResponse(OrthancDicomUploadResponse),
+    FolderUploadResponse(Vec<OrthancDicomUploadResponse>),
 }
 
 impl OrthancUploadResponse {
     pub fn success_message(&self) -> String {
         match self {
-            Self::OrthancDicomUploadResponse(inner) => match inner.status {
+            Self::FileUploadResponse(inner) => match inner.status {
                 OrthancUploadStatus::AlreadyStored => "Already Stored".to_string(),
                 OrthancUploadStatus::Success => "Success".to_string(),
             },
-            Self::OrthancFolderUploadResponse(inner) => {
+            Self::FolderUploadResponse(inner) => {
                 let new = inner
                     .iter()
                     .filter(|x| x.status == OrthancUploadStatus::Success)
@@ -46,8 +46,8 @@ impl OrthancUploadResponse {
 impl fmt::Display for OrthancUploadResponse {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::OrthancDicomUploadResponse(inner) => std::fmt::Display::fmt(&inner, f),
-            Self::OrthancFolderUploadResponse(inner) => {
+            Self::FileUploadResponse(inner) => std::fmt::Display::fmt(&inner, f),
+            Self::FolderUploadResponse(inner) => {
                 let strings: Vec<String> = inner.iter().map(|x| format!("{}", x)).collect();
                 write!(f, "{}", strings.join("\n"))
             }
@@ -134,5 +134,20 @@ impl fmt::Display for OrthancErrorResponse {
             self.orthanc_status,
             self.uri,
         )
+    }
+}
+
+impl OrthancErrorResponse {
+    pub(crate) fn failed_to_parse() -> Self {
+        Self {
+            details: "Failed to parse".to_string(),
+            http_error: "".to_string(),
+            http_status: 0,
+            message: "".to_string(),
+            method: "".to_string(),
+            orthanc_error: "".to_string(),
+            orthanc_status: 0,
+            uri: "".to_string(),
+        }
     }
 }

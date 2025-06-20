@@ -2,16 +2,16 @@ use std::collections::HashSet;
 use std::fs::File;
 use std::io::Write;
 use std::io::{BufRead, BufReader, BufWriter};
-use std::path::{Path, PathBuf};
-use std::sync::{Mutex, RwLock};
+use std::path::PathBuf;
+use std::sync::RwLock;
 
 pub trait FileUploadHistory {
     fn already_uploaded(&self, path: &PathBuf) -> bool;
     fn on_success(&self, path: &PathBuf);
 }
 
-pub struct NoFileUploadHistory;
-impl FileUploadHistory for NoFileUploadHistory {
+pub struct DisabledFileUploadHistory;
+impl FileUploadHistory for DisabledFileUploadHistory {
     fn already_uploaded(&self, _path: &PathBuf) -> bool {
         false
     }
