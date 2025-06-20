@@ -131,7 +131,7 @@ fn send_files(
 
 fn main() {
     let args = Args::parse();
-    
+
     let cache = args.cache_path.as_ref().map(|p| Cache::from_file(p));
     let mut updated_cache = cache.clone();
 
@@ -141,7 +141,7 @@ fn main() {
         WalkDir::new(&args.path)
             .into_iter()
             .filter_map(|e| e.ok())
-            .filter(|d| d.path().is_file() && !cache.as_ref().map_or(true, |c| c.paths.contains(d.path())))
+            .filter(|d| d.path().is_file() && !cache.as_ref().map_or(false, |c| c.paths.contains(d.path())))
             .for_each(|x| {
                 let files_tx = files_tx.clone();
                 let filepath = x.path().to_owned();
