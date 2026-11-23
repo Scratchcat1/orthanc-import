@@ -1,16 +1,15 @@
-mod orthanc_types;
-mod file_upload_history;
-mod upload;
-
-use crate::file_upload_history::{DisabledFileUploadHistory, FileUploadHistory, TextFileUploadHistory};
-use crate::upload::upload_from_channel;
+use orthanc_import::file_history::disabled::DisabledFileUploadHistory;
+use orthanc_import::file_history::sqlite::SqliteFileUploadHistory;
+use orthanc_import::file_history::util::FileUploadHistory;
+use orthanc_import::file_history::FileUploadHistoryImpl;
+use orthanc_import::orthanc::connector::OrthancConnector;
+use orthanc_import::threading::upload::upload_from_channel;
+use orthanc_import::threading::walk_tree::walk_dir;
 use clap::Parser;
-use crossbeam::channel::{bounded, Receiver, Sender};
-use std::sync::Arc;
+use crossbeam::channel::bounded;
+use r2d2_sqlite::SqliteConnectionManager;
 use std::{path::PathBuf, thread};
 use threadpool::ThreadPool;
-use upload::UploadResult;
-use walkdir::WalkDir;
 
 /// Command-line tool to import files into Orthanc.
 #[derive(Parser, Debug)]
@@ -45,75 +44,38 @@ struct Args {
     path: PathBuf,
 }
 
-fn start_send_files(
-    files_rx: Receiver<PathBuf>,
-    responses_tx: Sender<UploadResult>,
-    file_upload_history: Arc<dyn FileUploadHistory + Send + Sync>,
-    url: &str,
-    username: &Option<String>,
-    password: &Option<String>,
-    threads: usize,
-) {
-    let pool = ThreadPool::new(threads);
-
-    for _ in 0..threads {
-        let files_rx = files_rx.clone();
-        let responses_tx = responses_tx.clone();
-        let file_upload_history =  file_upload_history.clone();
-        let url = url.to_owned();
-        let username = username.clone().to_owned();
-        let password = password.clone().to_owned();
-        pool.execute(move || {
-            upload_from_channel(
-                files_rx,
-                responses_tx,
-                file_upload_history,
-                url,
-                username,
-                password
-            )
-        })
-    }
-}
-
-fn walk_dir(path: PathBuf, files_tx: Sender<PathBuf>) {
-    WalkDir::new(path)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|d| d.path().is_file())
-        .for_each(|x| {
-            files_tx
-                .send(x.path().to_owned())
-                .expect("channel will be there waiting for the pool");
-        })
-}
-
 fn main() {
     let args = Args::parse();
 
-    let file_upload_history: Arc<dyn FileUploadHistory + Send + Sync> = match &args.cache_path {
-        Some(path) => Arc::new(TextFileUploadHistory::from_file(path)),
-        None => Arc::new(DisabledFileUploadHistory {})
+    let connector = OrthancConnector::new(args.username, args.password, args.url);
+
+    let file_history: FileUploadHistoryImpl = match &args.cache_path {
+        Some(path) => {
+            let manager = SqliteConnectionManager::file(path);
+            let pool = r2d2::Pool::new(manager).unwrap();
+            FileUploadHistoryImpl::Sqlite(SqliteFileUploadHistory::new(pool))
+        }
+        None => FileUploadHistoryImpl::Disabled(DisabledFileUploadHistory::default()),
     };
 
     let (files_tx, files_rx) = bounded(100);
     let (responses_tx, responses_rx) = bounded(100);
 
     thread::spawn(move || walk_dir(args.path, files_tx));
-    start_send_files(
-        files_rx,
-        responses_tx,
-        file_upload_history.clone(),
-        &args.url,
-        &args.username,
-        &args.password,
-        args.threads,
-    );
+
+    let pool = ThreadPool::new(args.threads);
+    for _ in 0..pool.max_count() {
+        let connector = connector.clone();
+        let file_history = file_history.clone();
+        let files_rx = files_rx.clone();
+        let responses_tx = responses_tx.clone();
+        pool.execute(move || upload_from_channel(&connector, file_history, files_rx, responses_tx))
+    }
 
     let mut successes = 0;
     let mut failures = 0;
     responses_rx.iter().for_each(|upload_result| {
-        file_upload_history.on_uploaded(&upload_result.path);
+        file_history.on_upload(&upload_result.id);
         if upload_result.response.is_ok() {
             successes += 1;
         } else {
