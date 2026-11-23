@@ -1,8 +1,11 @@
 use std::{
-    fs::{self}, os::unix::fs::MetadataExt, path::{Path, PathBuf}, str::FromStr,
+    fs::{self},
+    os::unix::fs::MetadataExt,
+    path::{Path, PathBuf},
+    str::FromStr,
 };
 
-use crate::file_history::util::{digest_file};
+use crate::file_history::util::digest_file;
 
 use super::util::FileUploadHistory;
 use jiff::{tz::TimeZone, Timestamp, ZonedDateTime};
@@ -46,12 +49,7 @@ impl SqliteFileUploadHistory {
         result
     }
 
-    fn register_file(
-        &self,
-        path: &Path,
-        modified: ZonedDateTime,
-        size: u64,
-    ) -> u64 {
+    fn register_file(&self, path: &Path, modified: ZonedDateTime, size: u64) -> u64 {
         let digest = digest_file::<sha2::Sha256>(path);
         let conn = self.pool.get().unwrap();
         let result = conn
@@ -75,11 +73,13 @@ impl SqliteFileUploadHistory {
         result
     }
 
-    fn confirm_upload(
-        &self, id: u64
-    ) {
+    fn confirm_upload(&self, id: u64) {
         let conn = self.pool.get().unwrap();
-        conn.execute("UPDATE files SET uploaded = TRUE WHERE id = ?1", (i64::try_from(id).unwrap(), )).unwrap();
+        conn.execute(
+            "UPDATE files SET uploaded = TRUE WHERE id = ?1",
+            (i64::try_from(id).unwrap(),),
+        )
+        .unwrap();
     }
 }
 
@@ -130,19 +130,22 @@ pub fn apply_migrations(conn: &PooledConnection<SqliteConnectionManager>) -> u32
     .unwrap();
 
     let db_version: u32 = conn
-        .query_one("SELECT IFNULL(MAX(version), 0) FROM migrations", (), |x| x.get(0))
+        .query_one("SELECT IFNULL(MAX(version), 0) FROM migrations", (), |x| {
+            x.get(0)
+        })
         .unwrap();
 
-    let migrations = vec![
-        (1, "CREATE TABLE files(
+    let migrations = vec![(
+        1,
+        "CREATE TABLE files(
             id INTEGER PRIMARY KEY,
             path TEXT UNIQUE NOT NULL,
             last_modified TEXT NOT NULL,
             size INTEGER NOT NULL,
             digest TEXT NOT NULL,
             uploaded BOOL
-        )")
-    ];
+        )",
+    )];
 
     let mut change_count = 0;
 
@@ -150,10 +153,11 @@ pub fn apply_migrations(conn: &PooledConnection<SqliteConnectionManager>) -> u32
         if db_version < version {
             println!("{:?}", version);
             conn.execute(migration, ()).unwrap();
-            conn.execute("INSERT INTO migrations(version) VALUES (?1)", (version,)).unwrap();
+            conn.execute("INSERT INTO migrations(version) VALUES (?1)", (version,))
+                .unwrap();
             change_count += 1;
         }
     }
-    
+
     change_count
 }

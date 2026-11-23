@@ -1,4 +1,4 @@
-use std::{path::{Path}, time::Duration};
+use std::{path::Path, time::Duration};
 
 use reqwest::blocking::Client;
 
@@ -30,10 +30,7 @@ impl OrthancConnector {
         }
     }
 
-    pub fn upload_file(
-        &self,
-        path: &Path,
-    ) -> Result<OrthancUploadResponse, OrthancErrorResponse> {
+    pub fn upload_file(&self, path: &Path) -> Result<OrthancUploadResponse, OrthancErrorResponse> {
         upload_dicom(
             &self.client,
             &self.url,

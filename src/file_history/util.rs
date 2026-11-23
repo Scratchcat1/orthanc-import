@@ -1,5 +1,7 @@
 use std::{
-    fs::File, io::{BufReader, Read}, path::{Path},
+    fs::File,
+    io::{BufReader, Read},
+    path::Path,
 };
 
 use data_encoding::HEXLOWER;

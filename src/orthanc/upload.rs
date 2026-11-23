@@ -1,7 +1,7 @@
 use crate::orthanc::types::{OrthancErrorResponse, OrthancUploadResponse};
 use reqwest::blocking::Client;
 use std::fs::File;
-use std::path::{Path};
+use std::path::Path;
 
 pub fn upload_dicom(
     client: &Client,

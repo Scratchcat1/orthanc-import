@@ -1,3 +1,5 @@
+use clap::Parser;
+use crossbeam::channel::bounded;
 use orthanc_import::file_history::disabled::DisabledFileUploadHistory;
 use orthanc_import::file_history::sqlite::SqliteFileUploadHistory;
 use orthanc_import::file_history::util::FileUploadHistory;
@@ -5,8 +7,6 @@ use orthanc_import::file_history::FileUploadHistoryImpl;
 use orthanc_import::orthanc::connector::OrthancConnector;
 use orthanc_import::threading::upload::upload_from_channel;
 use orthanc_import::threading::walk_tree::walk_dir;
-use clap::Parser;
-use crossbeam::channel::bounded;
 use r2d2_sqlite::SqliteConnectionManager;
 use std::{path::PathBuf, thread};
 use threadpool::ThreadPool;
