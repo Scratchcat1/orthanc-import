@@ -1,7 +1,5 @@
 use std::{
-    fs::File,
-    io::{BufReader, Read},
-    path::PathBuf,
+    fs::File, io::{BufReader, Read}, path::{Path},
 };
 
 use data_encoding::HEXLOWER;
@@ -9,11 +7,11 @@ use sha2::Digest;
 
 pub trait FileUploadHistory {
     type ID;
-    fn check(&self, path: &PathBuf) -> Option<Self::ID>;
+    fn check(&self, path: &Path) -> Option<Self::ID>;
     fn on_upload(&self, id: &Self::ID);
 }
 
-pub fn digest_file<D: Digest>(path: &PathBuf) -> String {
+pub fn digest_file<D: Digest>(path: &Path) -> String {
     let mut reader = BufReader::new(File::open(path).unwrap());
     let mut hasher = D::new();
     let mut buffer = [0; 65536];

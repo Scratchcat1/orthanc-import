@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::file_history::{
     disabled::DisabledFileUploadHistory, sqlite::SqliteFileUploadHistory, util::FileUploadHistory,
 };
@@ -15,7 +17,7 @@ pub enum FileUploadHistoryImpl {
 impl FileUploadHistory for FileUploadHistoryImpl {
     type ID = u64;
 
-    fn check(&self, path: &std::path::PathBuf) -> Option<Self::ID> {
+    fn check(&self, path: &Path) -> Option<Self::ID> {
         match self {
             Self::Sqlite(history) => history.check(path),
             Self::Disabled(history) => history.check(path),

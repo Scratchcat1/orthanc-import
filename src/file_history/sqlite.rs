@@ -1,8 +1,5 @@
 use std::{
-    fs::{self},
-    os::unix::fs::MetadataExt,
-    path::PathBuf,
-    str::FromStr,
+    fs::{self}, os::unix::fs::MetadataExt, path::{Path, PathBuf}, str::FromStr,
 };
 
 use crate::file_history::util::{digest_file};
@@ -24,7 +21,7 @@ impl SqliteFileUploadHistory {
         return Self { pool };
     }
 
-    fn existing_record(&self, path: &PathBuf) -> Option<SqliteFileUploadRecord> {
+    fn existing_record(&self, path: &Path) -> Option<SqliteFileUploadRecord> {
         let conn = self.pool.get().unwrap();
         let result = conn
             .query_row(
@@ -51,7 +48,7 @@ impl SqliteFileUploadHistory {
 
     fn register_file(
         &self,
-        path: &PathBuf,
+        path: &Path,
         modified: ZonedDateTime,
         size: u64,
     ) -> u64 {
@@ -88,7 +85,7 @@ impl SqliteFileUploadHistory {
 
 impl FileUploadHistory for SqliteFileUploadHistory {
     type ID = u64;
-    fn check(&self, path: &PathBuf) -> Option<Self::ID> {
+    fn check(&self, path: &Path) -> Option<Self::ID> {
         let record = self.existing_record(path);
 
         let metadata = fs::metadata(path).unwrap();

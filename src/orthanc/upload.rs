@@ -1,14 +1,14 @@
 use crate::orthanc::types::{OrthancErrorResponse, OrthancUploadResponse};
 use reqwest::blocking::Client;
 use std::fs::File;
-use std::path::PathBuf;
+use std::path::{Path};
 
 pub fn upload_dicom(
     client: &Client,
     url: &str,
     username: Option<&str>,
     password: Option<&str>,
-    path: &PathBuf,
+    path: &Path,
 ) -> Result<OrthancUploadResponse, OrthancErrorResponse> {
     let file = File::open(&path).unwrap();
     let mut request = client.post(format!("{}/instances", url)).body(file);

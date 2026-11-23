@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path};
 
 use super::util::FileUploadHistory;
 
@@ -7,7 +7,7 @@ pub struct DisabledFileUploadHistory;
 
 impl FileUploadHistory for DisabledFileUploadHistory {
     type ID = u64;
-    fn check(&self, _path: &PathBuf) -> Option<Self::ID> {
+    fn check(&self, _path: &Path) -> Option<Self::ID> {
         return Some(0);
     }
 
